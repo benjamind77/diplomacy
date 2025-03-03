@@ -1,0 +1,848 @@
+import React, { useState, useEffect } from 'react';
+
+function App() {
+  // Constants for the application
+  const ADMIN_PASSWORD_HASH = '161266b4fa38e1e1cb56ce073635ca0986989a32cee7033af515270f8f960c2c';
+  
+  // Relation type definitions with colors
+  const RELATION_TYPES = [
+    { id: 'merged', name: 'Merged', color: '#00ff99' },
+    { id: 'allied', name: 'Allied', color: '#00cc00' },
+    { id: 'friendly', name: 'Friendly', color: '#0066ff' },
+    { id: 'trade', name: 'Trade Agreement', color: '#00cccc' },
+    { id: 'nonAggression', name: 'Non-Aggression Pact', color: '#ffcc00' },
+    { id: 'neutral', name: 'Neutral', color: '#999999' },
+    { id: 'tensions', name: 'Tensions', color: '#cc33ff' },
+    { id: 'hostile', name: 'Hostile', color: '#ff6600' },
+    { id: 'war', name: 'War', color: '#ff0000' }
+  ];
+  
+  // State management
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [viewMode, setViewMode] = useState('standard');
+  const [factions, setFactions] = useState([]);
+  const [relations, setRelations] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [password, setPassword] = useState('');
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [showFactionModal, setShowFactionModal] = useState(false);
+  const [showRelationModal, setShowRelationModal] = useState(false);
+  const [loginError, setLoginError] = useState('');
+  const [draggedFaction, setDraggedFaction] = useState(null);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [expandedFactions, setExpandedFactions] = useState([]);
+  
+  // Faction and relation data structures
+  const [newFaction, setNewFaction] = useState({
+    id: '',
+    name: '',
+    color: '#ffffff',
+    font: 'Arial',
+    description: '',
+    logoUrl: '',
+    x: 100,
+    y: 100
+  });
+  
+  const [newRelation, setNewRelation] = useState({
+    source: '',
+    target: '',
+    type: 'neutral'
+  });
+  
+  // Load data from localStorage when app starts
+  useEffect(() => {
+    const storedFactions = localStorage.getItem('factions');
+    const storedRelations = localStorage.getItem('relations');
+    const storedEvents = localStorage.getItem('events');
+    
+    if (storedFactions) setFactions(JSON.parse(storedFactions));
+    if (storedRelations) setRelations(JSON.parse(storedRelations));
+    if (storedEvents) setEvents(JSON.parse(storedEvents));
+  }, []);
+  
+  // Save factions to localStorage when they change
+  useEffect(() => {
+    localStorage.setItem('factions', JSON.stringify(factions));
+  }, [factions]);
+  
+  // Save relations to localStorage when they change
+  useEffect(() => {
+    localStorage.setItem('relations', JSON.stringify(relations));
+  }, [relations]);
+  
+  // Save events to localStorage when they change
+  useEffect(() => {
+    localStorage.setItem('events', JSON.stringify(events));
+  }, [events]);
+  
+  // Handle admin login with password verification
+  async function handleLogin() {
+    try {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(password);
+      const hashBuffer = await window.crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+      
+      if (hashHex === ADMIN_PASSWORD_HASH) {
+        setIsAdmin(true);
+        setShowLoginModal(false);
+        setLoginError('');
+      } else {
+        setLoginError('Invalid password');
+      }
+    } catch (error) {
+      setLoginError('Error processing login');
+    }
+  }
+  
+  // Handle admin logout
+  function handleLogout() {
+    setIsAdmin(false);
+  }
+  
+  // Show modal to add a new faction
+  function handleAddFaction() {
+    setNewFaction({
+      id: Date.now().toString(),
+      name: '',
+      color: '#ffffff',
+      font: 'Arial',
+      description: '',
+      logoUrl: '',
+      x: 100,
+      y: 100
+    });
+    setShowFactionModal(true);
+  }
+  
+  // Show modal to edit an existing faction
+  function handleEditFaction(faction) {
+    setNewFaction({ ...faction });
+    setShowFactionModal(true);
+  }
+  
+  // Save faction from modal
+  function handleSaveFaction() {
+    if (!newFaction.name.trim()) return;
+    
+    const updatedFactions = [...factions];
+    const existingIndex = updatedFactions.findIndex(f => f.id === newFaction.id);
+    
+    if (existingIndex >= 0) {
+      updatedFactions[existingIndex] = { ...newFaction };
+    } else {
+      updatedFactions.push({ ...newFaction });
+    }
+    
+    setFactions(updatedFactions);
+    setShowFactionModal(false);
+  }
+  
+  // Delete a faction
+  function handleDeleteFaction(factionId) {
+    setFactions(factions.filter(f => f.id !== factionId));
+    setRelations(relations.filter(r => r.source !== factionId && r.target !== factionId));
+  }
+  
+  // Handle logo file upload for a faction
+  function handleLogoUpload(e) {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setNewFaction({...newFaction, logoUrl: reader.result});
+      };
+      reader.readAsDataURL(file);
+    }
+  }
+  
+  // Toggle expanded state for a faction card
+  function toggleFactionExpanded(factionId) {
+    if (expandedFactions.includes(factionId)) {
+      setExpandedFactions(expandedFactions.filter(id => id !== factionId));
+    } else {
+      setExpandedFactions([...expandedFactions, factionId]);
+    }
+  }
+  
+  // Drag and drop functionality for faction positioning
+  function handleDragStart(e, faction) {
+    if (!isAdmin) return;
+    
+    const rect = e.currentTarget.getBoundingClientRect();
+    const offsetX = e.clientX - rect.left;
+    const offsetY = e.clientY - rect.top;
+    
+    setDraggedFaction(faction);
+    setDragOffset({ x: offsetX, y: offsetY });
+  }
+  
+  function handleDragMove(e) {
+    if (!draggedFaction || !isAdmin) return;
+    
+    const container = document.getElementById('faction-map');
+    if (!container) return;
+    
+    const rect = container.getBoundingClientRect();
+    
+    // Calculate new position with grid snapping (grid size of 20px)
+    const gridSize = 20;
+    let newX = Math.round((e.clientX - rect.left - dragOffset.x) / gridSize) * gridSize;
+    let newY = Math.round((e.clientY - rect.top - dragOffset.y) / gridSize) * gridSize;
+    
+    // Ensure faction stays within bounds
+    newX = Math.max(0, Math.min(rect.width - 80, newX));
+    newY = Math.max(0, Math.min(rect.height - 80, newY));
+    
+    // Update faction position
+    const updatedFactions = factions.map(f => 
+      f.id === draggedFaction.id ? { ...f, x: newX, y: newY } : f
+    );
+    
+    setFactions(updatedFactions);
+  }
+  
+  function handleDragEnd() {
+    setDraggedFaction(null);
+  }
+  
+  // Relation management
+  function handleAddRelation() {
+    setNewRelation({
+      source: '',
+      target: '',
+      type: 'neutral'
+    });
+    setShowRelationModal(true);
+  }
+  
+  function handleSaveRelation() {
+    if (!newRelation.source || !newRelation.target || newRelation.source === newRelation.target) return;
+    
+    // Check if this relation already exists
+    const existingIndex = relations.findIndex(
+      r => (r.source === newRelation.source && r.target === newRelation.target) || 
+           (r.source === newRelation.target && r.target === newRelation.source)
+    );
+    
+    const updatedRelations = [...relations];
+    
+    if (existingIndex >= 0) {
+      updatedRelations[existingIndex] = { ...newRelation };
+    } else {
+      updatedRelations.push({ ...newRelation });
+    }
+    
+    setRelations(updatedRelations);
+    setShowRelationModal(false);
+  }
+  
+  // View mode switching
+  function switchToStandard() {
+    setViewMode('standard');
+  }
+  
+  function switchToMap() {
+    setViewMode('map');
+  }
+  
+  function switchToTimeline() {
+    setViewMode('timeline');
+  }
+  
+  // Helper function to calculate relation paths for the map view
+  function calculateRelationPaths() {
+    return relations.filter(r => r.type !== 'neutral').map(relation => {
+      const sourceFaction = factions.find(f => f.id === relation.source);
+      const targetFaction = factions.find(f => f.id === relation.target);
+      
+      if (!sourceFaction || !targetFaction) return null;
+      
+      // Calculate center points of each faction
+      const sourceX = sourceFaction.x + 40;
+      const sourceY = sourceFaction.y + 40;
+      const targetX = targetFaction.x + 40;
+      const targetY = targetFaction.y + 40;
+      
+      // Create a simple path with 90-degree turns
+      let path = '';
+      
+      if (Math.abs(sourceX - targetX) > Math.abs(sourceY - targetY)) {
+        // Horizontal dominant path
+        const midX = (sourceX + targetX) / 2;
+        path = `M ${sourceX} ${sourceY} L ${midX} ${sourceY} L ${midX} ${targetY} L ${targetX} ${targetY}`;
+      } else {
+        // Vertical dominant path
+        const midY = (sourceY + targetY) / 2;
+        path = `M ${sourceX} ${sourceY} L ${sourceX} ${midY} L ${targetX} ${midY} L ${targetX} ${targetY}`;
+      }
+      
+      const relationType = RELATION_TYPES.find(t => t.id === relation.type);
+      
+      return {
+        path,
+        color: relationType ? relationType.color : '#999999',
+        width: 3,
+        source: relation.source,
+        target: relation.target,
+        type: relation.type
+      };
+    }).filter(Boolean);
+  }
+  
+  // Helper function to get relations for a specific faction
+  function getFactionRelations(factionId) {
+    return relations
+      .filter(r => r.source === factionId || r.target === factionId)
+      .map(r => {
+        const otherFactionId = r.source === factionId ? r.target : r.source;
+        const otherFaction = factions.find(f => f.id === otherFactionId);
+        const relationType = RELATION_TYPES.find(t => t.id === r.type);
+        
+        // Only return valid relations where the other faction exists
+        if (!otherFaction || !relationType) return null;
+        
+        return {
+          faction: otherFaction,
+          type: relationType
+        };
+      })
+      .filter(Boolean); // Filter out null/undefined values
+  }
+  
+  // Render the Standard View
+  function renderStandardView() {
+    return (
+      <div className="h-full p-6 overflow-auto">
+        <div className="mb-6 flex justify-between items-center">
+          <h2 className="text-2xl text-blue-400">Factions</h2>
+          <div className="flex space-x-2">
+            {isAdmin && (
+              <button
+                onClick={handleAddFaction}
+                className="bg-red-900 hover:bg-red-800 text-white px-4 py-2 rounded"
+              >
+                Add Faction
+              </button>
+            )}
+            {isAdmin && factions.length >= 2 && (
+              <button
+                onClick={handleAddRelation}
+                className="bg-red-900 hover:bg-red-800 text-white px-4 py-2 rounded"
+              >
+                Add Relation
+              </button>
+            )}
+          </div>
+        </div>
+        
+        {factions.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {factions.map(faction => {
+              const isExpanded = expandedFactions.includes(faction.id);
+              return (
+                <div 
+                  key={faction.id}
+                  className="bg-gray-800 p-4 rounded-lg border border-gray-700 hover:border-blue-400 transition-colors cursor-pointer"
+                  onClick={() => toggleFactionExpanded(faction.id)}
+                >
+                  <div className="flex justify-between items-center mb-2">
+                    <div className="flex items-center">
+                      {faction.logoUrl ? (
+                        <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-700 mr-3 flex-shrink-0">
+                          <img 
+                            src={faction.logoUrl} 
+                            alt={faction.name} 
+                            className="w-full h-full object-contain"
+                          />
+                        </div>
+                      ) : (
+                        <div 
+                          className="w-10 h-10 rounded-full bg-gray-700 mr-3 flex items-center justify-center flex-shrink-0"
+                          style={{ color: faction.color }}
+                        >
+                          {faction.name.substring(0, 2)}
+                        </div>
+                      )}
+                      
+                      <h3 
+                        className="text-xl font-bold" 
+                        style={{ color: faction.color, fontFamily: faction.font }}
+                      >
+                        {faction.name}
+                      </h3>
+                    </div>
+                    
+                    {isAdmin && (
+                      <div className="flex space-x-2" onClick={e => e.stopPropagation()}>
+                        <button 
+                          onClick={() => handleEditFaction(faction)}
+                          className="text-blue-400 hover:text-blue-300 px-2 py-1"
+                        >
+                          Edit
+                        </button>
+                        <button 
+                          onClick={() => handleDeleteFaction(faction.id)}
+                          className="text-red-500 hover:text-red-400 px-2 py-1"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* Show either truncated or full description based on expanded state */}
+                  {isExpanded ? (
+                    <div className="text-gray-300 text-sm mb-4">{faction.description}</div>
+                  ) : (
+                    <div className="text-gray-300 text-sm mb-4 line-clamp-2">
+                      {faction.description.length > 100 
+                        ? `${faction.description.substring(0, 100)}...` 
+                        : faction.description}
+                    </div>
+                  )}
+                  
+                  {/* Display relations - only when expanded */}
+                  {isExpanded && getFactionRelations(faction.id).length > 0 && (
+                    <div>
+                      <h4 className="text-blue-400 text-sm font-bold mb-2">Relations:</h4>
+                      <div className="space-y-1">
+                        {getFactionRelations(faction.id).map((relation, index) => (
+                          <div key={index} className="flex items-center text-sm">
+                            <div 
+                              className="w-2 h-2 rounded-full mr-2" 
+                              style={{ backgroundColor: relation.type.color }}
+                            ></div>
+                            <span className="text-gray-300">{relation.faction.name}: </span>
+                            <span 
+                              className="ml-1 font-medium"
+                              style={{ color: relation.type.color }}
+                            >
+                              {relation.type.name}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Show expand/collapse hint */}
+                  <div className="text-gray-500 text-xs mt-2 text-right">
+                    {isExpanded ? "Click to collapse" : "Click to expand"}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="text-center text-gray-400 py-12">
+            <p className="text-xl mb-4">No factions added yet</p>
+            {isAdmin && (
+              <p className="text-sm">Click the "Add Faction" button to create your first faction</p>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+  
+  // Render the Map View
+  function renderMapView() {
+    const relationPaths = calculateRelationPaths();
+    
+    return (
+      <div className="h-full p-6 overflow-auto">
+        <div className="mb-6 flex justify-between items-center">
+          <h2 className="text-2xl text-blue-400">Faction Map</h2>
+        </div>
+        
+        {factions.length > 0 ? (
+          <div 
+            id="faction-map"
+            className="relative w-full h-[500px] bg-gray-900 border border-gray-700 rounded-lg"
+            onMouseMove={handleDragMove}
+            onMouseUp={handleDragEnd}
+            onMouseLeave={handleDragEnd}
+          >
+            {/* Draw relation lines */}
+            <svg className="absolute inset-0 w-full h-full pointer-events-none">
+              {relationPaths.map((path, index) => (
+                <path
+                  key={index}
+                  d={path.path}
+                  stroke={path.color}
+                  strokeWidth={path.width}
+                  fill="none"
+                  strokeDasharray={path.type === 'nonAggression' ? '10 5' : undefined}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{
+                    filter: `drop-shadow(0 0 4px ${path.color})`
+                  }}
+                />
+              ))}
+            </svg>
+            
+            {/* Render factions */}
+            {factions.map(faction => (
+              <div 
+                key={faction.id}
+                className={`absolute w-20 h-20 flex flex-col items-center justify-center ${isAdmin ? 'cursor-move' : 'cursor-pointer'} transition-transform hover:scale-110`}
+                style={{
+                  left: `${faction.x}px`,
+                  top: `${faction.y}px`,
+                  fontFamily: faction.font
+                }}
+                onMouseDown={(e) => handleDragStart(e, faction)}
+              >
+                {faction.logoUrl ? (
+                  <div 
+                    className="w-16 h-16 rounded-full overflow-hidden bg-gray-800 border-2 border-gray-700 mb-1"
+                    style={{ boxShadow: `0 0 10px ${faction.color}` }}
+                  >
+                    <img 
+                      src={faction.logoUrl} 
+                      alt={faction.name} 
+                      className="w-full h-full object-contain"
+                    />
+                  </div>
+                ) : (
+                  <div 
+                    className="w-16 h-16 rounded-full bg-gray-800 border-2 border-gray-700 flex items-center justify-center mb-1"
+                    style={{ boxShadow: `0 0 10px ${faction.color}` }}
+                  >
+                    <div style={{ color: faction.color, fontSize: '24px' }}>
+                      {faction.name.substring(0, 2)}
+                    </div>
+                  </div>
+                )}
+                <div 
+                  className="text-sm font-bold truncate w-full text-center" 
+                  style={{ color: faction.color, textShadow: `0 0 5px ${faction.color}` }}
+                >
+                  {faction.name}
+                </div>
+              </div>
+            ))}
+            
+            {/* Admin-only instructions */}
+            {isAdmin && (
+              <div className="absolute bottom-4 right-4 bg-gray-800 p-2 rounded text-xs text-gray-400">
+                Drag factions to reposition them. <br/>
+                Positions will automatically snap to grid.
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="text-center text-gray-400 py-12">
+            <p className="text-xl mb-4">No factions added yet</p>
+            {isAdmin && (
+              <p className="text-sm">Add factions in the Standard view to see them on the map</p>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+  
+  // Render the Timeline View
+  function renderTimelineView() {
+    return (
+      <div className="h-full p-6 overflow-auto">
+        <div className="mb-6 flex justify-between items-center">
+          <h2 className="text-2xl text-blue-400">Timeline</h2>
+        </div>
+        
+        <div className="text-center text-gray-400 py-12">
+          <p className="text-xl mb-4">Timeline View</p>
+          <p className="text-sm">This feature will allow you to track historical events</p>
+        </div>
+      </div>
+    );
+  }
+  
+  // Faction modal component
+  function FactionModal() {
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
+        <div className="bg-gray-800 p-6 rounded-lg border-2 border-blue-400 shadow-lg w-96">
+          <h2 className="text-2xl font-bold text-blue-400 mb-4">
+            {newFaction.id ? 'Edit Faction' : 'Add Faction'}
+          </h2>
+          
+          <div className="space-y-4">
+            <div>
+              <label className="block text-gray-300 mb-1">Faction Name</label>
+              <input
+                type="text"
+                value={newFaction.name}
+                onChange={(e) => setNewFaction({...newFaction, name: e.target.value})}
+                className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-white"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-gray-300 mb-1">Logo</label>
+              <div className="flex items-center">
+                <label className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded cursor-pointer">
+                  Upload Logo
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleLogoUpload}
+                    className="hidden"
+                  />
+                </label>
+                {newFaction.logoUrl && (
+                  <div className="ml-3 w-12 h-12 bg-gray-700 rounded overflow-hidden">
+                    <img 
+                      src={newFaction.logoUrl} 
+                      alt="Logo preview" 
+                      className="w-full h-full object-contain"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <div>
+              <label className="block text-gray-300 mb-1">Color</label>
+              <input
+                type="color"
+                value={newFaction.color}
+                onChange={(e) => setNewFaction({...newFaction, color: e.target.value})}
+                className="w-full h-10 p-1 bg-gray-700 border border-gray-600 rounded"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-gray-300 mb-1">Font</label>
+              <select
+                value={newFaction.font}
+                onChange={(e) => setNewFaction({...newFaction, font: e.target.value})}
+                className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-white"
+              >
+                <option value="Arial">Arial</option>
+                <option value="Courier New">Courier New</option>
+                <option value="Times New Roman">Times New Roman</option>
+                <option value="Verdana">Verdana</option>
+                <option value="Tahoma">Tahoma</option>
+              </select>
+            </div>
+            
+            <div>
+              <label className="block text-gray-300 mb-1">Description</label>
+              <textarea
+                value={newFaction.description}
+                onChange={(e) => setNewFaction({...newFaction, description: e.target.value})}
+                className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-white h-24"
+              />
+            </div>
+          </div>
+          
+          <div className="flex justify-end mt-6">
+            <button
+              onClick={() => setShowFactionModal(false)}
+              className="bg-gray-700 text-white px-4 py-2 rounded mr-2 hover:bg-gray-600"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSaveFaction}
+              className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-500"
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  
+  // Relation modal component
+  function RelationModal() {
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
+        <div className="bg-gray-800 p-6 rounded-lg border-2 border-blue-400 shadow-lg w-96">
+          <h2 className="text-2xl font-bold text-blue-400 mb-4">Add Relation</h2>
+          
+          <div className="space-y-4">
+            <div>
+              <label className="block text-gray-300 mb-1">Source Faction</label>
+              <select
+                value={newRelation.source}
+                onChange={(e) => setNewRelation({...newRelation, source: e.target.value})}
+                className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-white"
+              >
+                <option value="">Select a faction</option>
+                {factions.map(faction => (
+                  <option key={faction.id} value={faction.id}>{faction.name}</option>
+                ))}
+              </select>
+            </div>
+            
+            <div>
+              <label className="block text-gray-300 mb-1">Target Faction</label>
+              <select
+                value={newRelation.target}
+                onChange={(e) => setNewRelation({...newRelation, target: e.target.value})}
+                className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-white"
+              >
+                <option value="">Select a faction</option>
+                {factions.map(faction => (
+                  <option key={faction.id} value={faction.id} disabled={faction.id === newRelation.source}>
+                    {faction.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            
+            <div>
+              <label className="block text-gray-300 mb-1">Relation Type</label>
+              <select
+                value={newRelation.type}
+                onChange={(e) => setNewRelation({...newRelation, type: e.target.value})}
+                className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-white"
+              >
+                {RELATION_TYPES.map(type => (
+                  <option key={type.id} value={type.id}>{type.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          
+          <div className="flex justify-end mt-6">
+            <button
+              onClick={() => setShowRelationModal(false)}
+              className="bg-gray-700 text-white px-4 py-2 rounded mr-2 hover:bg-gray-600"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSaveRelation}
+              className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-500"
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  
+  // Login modal component
+  function LoginModal() {
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
+        <div className="bg-gray-800 p-6 rounded-lg border-2 border-blue-400 shadow-lg w-96">
+          <h2 className="text-2xl font-bold text-blue-400 mb-4">Admin Login</h2>
+          
+          <div className="mb-4">
+            <input
+              type="password"
+              placeholder="Enter admin password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+              className="w-full p-2 bg-gray-700 border border-gray-600 rounded text-white"
+            />
+            {loginError && (
+              <p className="text-red-500 mt-2">{loginError}</p>
+            )}
+          </div>
+          
+          <div className="flex justify-end">
+            <button
+              onClick={() => setShowLoginModal(false)}
+              className="bg-gray-700 text-white px-4 py-2 rounded mr-2 hover:bg-gray-600"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleLogin}
+              className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-500"
+            >
+              Login
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  
+  // Main application render
+  return (
+    <div className="flex flex-col h-screen bg-gray-900 text-gray-200">
+      {/* Header */}
+      <header className="bg-gray-800 border-b border-gray-700 py-3 px-6">
+        <div className="flex justify-between items-center">
+          <h1 className="text-2xl font-bold text-blue-400">
+            WoS Faction Diplomacy
+          </h1>
+          
+          <div className="flex items-center space-x-4">
+            {/* View Mode Selector */}
+            <div className="flex bg-gray-700 rounded p-1">
+              <button
+                onClick={switchToStandard}
+                className={viewMode === 'standard' ? "px-3 py-1 rounded flex items-center text-sm bg-blue-600 text-white" : "px-3 py-1 rounded flex items-center text-sm text-gray-300 hover:bg-gray-600"}
+              >
+                Standard
+              </button>
+              <button
+                onClick={switchToMap}
+                className={viewMode === 'map' ? "px-3 py-1 rounded flex items-center text-sm bg-blue-600 text-white" : "px-3 py-1 rounded flex items-center text-sm text-gray-300 hover:bg-gray-600"}
+              >
+                Map
+              </button>
+              <button
+                onClick={switchToTimeline}
+                className={viewMode === 'timeline' ? "px-3 py-1 rounded flex items-center text-sm bg-blue-600 text-white" : "px-3 py-1 rounded flex items-center text-sm text-gray-300 hover:bg-gray-600"}
+              >
+                Timeline
+              </button>
+            </div>
+            
+            {/* Admin Controls */}
+            {isAdmin ? (
+              <button
+                onClick={handleLogout}
+                className="bg-red-900 hover:bg-red-800 text-white px-3 py-1 rounded text-sm"
+              >
+                Logout
+              </button>
+            ) : (
+              <button
+                onClick={() => setShowLoginModal(true)}
+                className="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded text-sm"
+              >
+                Admin Login
+              </button>
+            )}
+          </div>
+        </div>
+      </header>
+      
+      {/* Main Content */}
+      <main className="flex-1 overflow-hidden">
+        {viewMode === 'standard' && renderStandardView()}
+        {viewMode === 'map' && renderMapView()}
+        {viewMode === 'timeline' && renderTimelineView()}
+      </main>
+      
+      {/* Footer */}
+      <footer className="bg-gray-800 border-t border-gray-700 py-2 px-6 text-center text-gray-400 text-sm">
+        <p>GeoTech Corporation &copy; {new Date().getFullYear()}</p>
+      </footer>
+      
+      {/* Modals */}
+      {showLoginModal && <LoginModal />}
+      {showFactionModal && <FactionModal />}
+      {showRelationModal && <RelationModal />}
+    </div>
+  );
+}
+
+export default App;
